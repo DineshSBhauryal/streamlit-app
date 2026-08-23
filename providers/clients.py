@@ -10,17 +10,55 @@ class ProviderError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ModelOption:
+    model_id: str
+    input_price: float
+    output_price: float
+
+    @property
+    def label(self) -> str:
+        return (
+            f"{self.model_id} · ${self.input_price:g} input / "
+            f"${self.output_price:g} output per 1M tokens"
+        )
+
+
+@dataclass(frozen=True)
 class Provider:
     label: str
     key_label: str
     key_placeholder: str
-    model: str
+    models: tuple[ModelOption, ...]
 
 
 PROVIDERS = {
-    "anthropic": Provider("Claude", "Anthropic API key", "sk-ant-...", "claude-3-5-sonnet-latest"),
-    "openai": Provider("OpenAI", "OpenAI API key", "sk-...", "gpt-4o-mini"),
-    "xai": Provider("Grok", "xAI API key", "xai-...", "grok-3-mini"),
+    "anthropic": Provider(
+        "Claude",
+        "Anthropic API key",
+        "sk-ant-...",
+        (
+            ModelOption("claude-3-5-sonnet-latest", 3.0, 15.0),
+            ModelOption("claude-3-haiku-20240307", 0.25, 1.25),
+        ),
+    ),
+    "openai": Provider(
+        "OpenAI",
+        "OpenAI API key",
+        "sk-...",
+        (
+            ModelOption("gpt-4o-mini", 0.15, 0.60),
+            ModelOption("gpt-4o", 2.50, 10.0),
+        ),
+    ),
+    "xai": Provider(
+        "Grok",
+        "xAI API key",
+        "xai-...",
+        (
+            ModelOption("grok-3-mini", 0.30, 0.50),
+            ModelOption("grok-3", 3.0, 15.0),
+        ),
+    ),
 }
 
 
@@ -94,7 +132,9 @@ class AnthropicClient(BaseProviderClient):
         return "\n".join(block["text"] for block in data["content"] if block.get("type") == "text")
 
 
-def create_provider(provider_id: str, api_key: str) -> BaseProviderClient:
+def create_provider(provider_id: str, api_key: str, model: str) -> BaseProviderClient:
     provider = PROVIDERS[provider_id]
     client_type = {"anthropic": AnthropicClient, "openai": OpenAIClient, "xai": XAIClient}[provider_id]
-    return client_type(api_key, provider.model)
+    if model not in {option.model_id for option in provider.models}:
+        raise ProviderError(f"Model {model!r} is not available for {provider.label}.")
+    return client_type(api_key, model)

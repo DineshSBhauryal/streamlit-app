@@ -29,7 +29,7 @@ def remember_key(provider_id: str, value: str) -> None:
         st.session_state.provider_keys[provider_id] = value.strip()
 
 
-def render_sidebar() -> tuple[str, str]:
+def render_sidebar() -> tuple[str, str, str]:
     with st.sidebar:
         st.markdown("<div class='brand-mark'>N<span>•</span></div>", unsafe_allow_html=True)
         st.markdown("<div class='brand-name'>Nexora</div>", unsafe_allow_html=True)
@@ -44,6 +44,11 @@ def render_sidebar() -> tuple[str, str]:
             label_visibility="collapsed",
         )
         provider = PROVIDERS[provider_id]
+        model = st.selectbox(
+            "Choose a model",
+            options=provider.models,
+            format_func=lambda option: option.label,
+        )
         key_value = st.text_input(
             provider.key_label,
             type="password",
@@ -76,7 +81,7 @@ def render_sidebar() -> tuple[str, str]:
         st.markdown("#### Learning path")
         st.markdown("<div class='side-note'>Pick a subject, set the depth, and ask for an explanation shaped around the way you learn.</div>", unsafe_allow_html=True)
         st.markdown("<div class='privacy-note'>Session privacy<br><strong>Keys disappear with this session.</strong></div>", unsafe_allow_html=True)
-    return provider_id, st.session_state.provider_keys.get(provider_id, "")
+    return provider_id, model.model_id, st.session_state.provider_keys.get(provider_id, "")
 
 
 def render_topic_picker() -> str:
@@ -115,7 +120,7 @@ def render_controls(topic: str) -> tuple[str, str, str, bool]:
 
 
 def main() -> None:
-    provider_id, api_key = render_sidebar()
+    provider_id, model, api_key = render_sidebar()
     left, right = st.columns([1.55, 1], gap="large")
     with left:
         topic = render_topic_picker()
@@ -134,7 +139,7 @@ def main() -> None:
                 with st.spinner("Building your explanation..."):
                     try:
                         prompt = build_explanation_prompt(question, level, style, analogy)
-                        client = create_provider(provider_id, api_key)
+                        client = create_provider(provider_id, api_key, model)
                         st.session_state.answer = client.explain(prompt)
                         st.session_state.last_request = (question, provider_id)
                     except ProviderError as error:
