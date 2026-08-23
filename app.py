@@ -4,7 +4,7 @@ import streamlit as st
 
 from core.catalog import TOPIC_GROUPS
 from core.prompts import build_explanation_prompt
-from providers.clients import PROVIDERS, ProviderError, create_provider
+from providers.clients import PROVIDERS, ProviderError, create_provider, list_available_models
 from ui.styles import load_styles
 
 
@@ -18,6 +18,8 @@ load_styles()
 
 if "provider_keys" not in st.session_state:
     st.session_state.provider_keys = {}
+if "provider_models" not in st.session_state:
+    st.session_state.provider_models = {}
 if "answer" not in st.session_state:
     st.session_state.answer = None
 if "last_request" not in st.session_state:
@@ -29,7 +31,7 @@ def remember_key(provider_id: str, value: str) -> None:
         st.session_state.provider_keys[provider_id] = value.strip()
 
 
-def render_sidebar() -> tuple[str, str, str]:
+def render_sidebar() -> tuple[str, str | None, str]:
     with st.sidebar:
         st.markdown("<div class='brand-mark'>N<span>•</span></div>", unsafe_allow_html=True)
         st.markdown("<div class='brand-name'>Nexora</div>", unsafe_allow_html=True)
@@ -44,11 +46,6 @@ def render_sidebar() -> tuple[str, str, str]:
             label_visibility="collapsed",
         )
         provider = PROVIDERS[provider_id]
-        model = st.selectbox(
-            "Choose a model",
-            options=provider.models,
-            format_func=lambda option: option.label,
-        )
         key_value = st.text_input(
             provider.key_label,
             type="password",
@@ -61,8 +58,13 @@ def render_sidebar() -> tuple[str, str, str]:
         with key_col:
             if st.button("Connect", use_container_width=True, type="primary"):
                 if key_value and key_value != "Stored for this session":
-                    remember_key(provider_id, key_value)
-                    st.success("Connected for this session.")
+                    try:
+                        models = list_available_models(provider_id, key_value)
+                        remember_key(provider_id, key_value)
+                        st.session_state.provider_models[provider_id] = models
+                        st.success("Connected for this session.")
+                    except ProviderError as error:
+                        st.error(str(error))
                 elif provider_id in st.session_state.provider_keys:
                     st.info("Already connected.")
                 else:
@@ -70,10 +72,25 @@ def render_sidebar() -> tuple[str, str, str]:
         with forget_col:
             if st.button("Forget keys", use_container_width=True):
                 st.session_state.provider_keys.clear()
+                st.session_state.provider_models.clear()
                 st.session_state.answer = None
                 st.rerun()
 
         connected = provider_id in st.session_state.provider_keys
+        model = None
+        if connected:
+            if provider_id not in st.session_state.provider_models:
+                try:
+                    st.session_state.provider_models[provider_id] = list_available_models(
+                        provider_id, st.session_state.provider_keys[provider_id]
+                    )
+                except ProviderError as error:
+                    st.error(str(error))
+            model = st.selectbox(
+                "Choose a model",
+                options=st.session_state.provider_models.get(provider_id, ()),
+                format_func=lambda option: option.label,
+            )
         status = "Connected for this session" if connected else "Not connected"
         status_class = "status-online" if connected else "status-offline"
         st.markdown(f"<div class='connection-status {status_class}'><span></span>{status}</div>", unsafe_allow_html=True)
@@ -81,7 +98,7 @@ def render_sidebar() -> tuple[str, str, str]:
         st.markdown("#### Learning path")
         st.markdown("<div class='side-note'>Pick a subject, set the depth, and ask for an explanation shaped around the way you learn.</div>", unsafe_allow_html=True)
         st.markdown("<div class='privacy-note'>Session privacy<br><strong>Keys disappear with this session.</strong></div>", unsafe_allow_html=True)
-    return provider_id, model.model_id, st.session_state.provider_keys.get(provider_id, "")
+    return provider_id, model.model_id if model else None, st.session_state.provider_keys.get(provider_id, "")
 
 
 def render_topic_picker() -> str:
@@ -133,7 +150,7 @@ def main() -> None:
         if explain:
             if not question.strip():
                 st.warning("Add a topic or question first.")
-            elif not api_key:
+            elif not api_key or not model:
                 st.error("Connect an API provider in the sidebar before asking for an explanation.")
             else:
                 with st.spinner("Building your explanation..."):
